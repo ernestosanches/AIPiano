@@ -10,6 +10,9 @@ import numpy as np
 import pygame
 
 
+import serial
+from glob import glob
+
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 
@@ -21,6 +24,7 @@ class Sensor:
         self.samples = np.array([])
         self.buffer = []
         self.is_calibrated = False
+        self.name = 'unknown'
     
     def calibrate_noise(self, start, end):
         self.sigma= np.std(self.samples[start:end])
@@ -64,6 +68,7 @@ import mido
 class MidiSensor(Sensor):
     def __init__(self):
         Sensor.__init__(self)
+        self.name = 'midi'
         device_names = mido.get_input_names()
         if device_names:
             self.device = mido.open_input(mido.get_input_names()[0])
@@ -89,7 +94,8 @@ class MidiSensor(Sensor):
 class LidarSensor(Sensor):
     def __init__(self):
         Sensor.__init__(self)
-        serial_port = '/dev/ttyUSB2'
+        self.name = 'lidar'
+        serial_port = glob('/dev/ttyUSB*')[0]
         lidar = RPLidar(port=serial_port)
         print("Sent RESET command...")
         lidar.reset()
@@ -122,31 +128,23 @@ class LidarSensor(Sensor):
         #print("[{}] Read {} samples... Mean: {}".format(
         #    time.time(), len(self.buffer), np.mean(self.buffer)))
   
-import serial
-
-      
+from msgpack import Unpacker
     
 class AccelerometerSensor(Sensor):
     def __init__(self):
         Sensor.__init__(self)
-        serial_port = '/dev/ttyACM1'
+        self.name = 'gyro'
+        serial_port = glob('/dev/ttyACM*')[0]
         ser = serial.Serial(
             port=serial_port,
             baudrate=115200,
             timeout=0.0)
         self.ser = ser
-        ser.read(ser.inWaiting())
-        while self.ser.read() != b'\n':
-            pass # flushing old data
+        self.unpacker = Unpacker()
         
-    def read_samples(self):        
-        block = self.ser.inWaiting()
-        MESSAGE_LEN = 10
-        if block > MESSAGE_LEN:
-            data = self.ser.read(block // MESSAGE_LEN * MESSAGE_LEN)
-            self.buffer = [float(s.decode().strip()) for s in data.splitlines()]
-            #print("[{}] Read {} samples... Mean: {}".format(
-            #    time.time(), len(self.buffer), np.mean(self.buffer)))
+    def read_samples(self): 
+        self.unpacker.feed(self.ser.read(self.ser.inWaiting()))
+        self.buffer = [x for x in self.unpacker if type(x) is float]
         
     def calibrate_values(self, start, end, reset=True):
         self.min = 0
@@ -359,21 +357,13 @@ grapher = Grapher(processor, max_len=4000)
 ani = grapher.get_animation()
 
 
-'''
+
 from os import path
-TRIM = 2000
 
-def save_data():
-    folder = path.expanduser("~/Projects/Sound/AIPiano/data/lidar/")
-    np.save(folder + "samples_laser2", samples[TRIM:])
-    np.save(folder +"samples_midi2", samples_midi[TRIM:])
+def save_data(sensors):
+    folder = path.expanduser("~/Projects/Sound/AIPiano/data/lidar2/")
+    for sensor in sensors:
+        filename = path.join(folder, "samples_{}".format(sensor.name))
+        np.save(filename, sensor.samples)
 
-def plot_data():
-   plt.plot(samples[TRIM:])
-   plt.plot(samples_midi[TRIM:])
-plot_data()
-
-save_data()
-'''
-
-#out_port = mido.open_output(mido.get_output_names()[0])
+#save_data(sensors)
